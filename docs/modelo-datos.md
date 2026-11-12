@@ -24,6 +24,7 @@
 - **rent_changes**: historial de rentas: guarda la renta inicial de cada contrato y cada actualización anual. Sirve para la grafica
 - **rent_indexes**: Valores del indice oficial que limita cuanto se puede subir la renta cada año.
 - **company_services**: servicios que ofrece cada compañía (luz, agua, gas, internet). Sirve para filtrar la lista de compañías según el suministro.
+- **provinces**: las 52 provincias de España (50 provincias más Ceuta y Melilla) con su código oficial, que coincide con los dos primeros dígitos del código postal.
 
 ## 3. Reglas de negocio
 
@@ -139,7 +140,7 @@ para declarar sus ingresos.
 | door | texto | no | ej: "A", "12"; vacío en casas |
 | postal_code | texto | sí | texto de 5 caracteres para no perder el 0 inicial (ej: 08001) |
 | city | texto | sí | máximo 100 caracteres |
-| province | lista de valores | sí | una de las 52 provincias de España |
+| province_code | texto (2) | sí | apunta a provinces; debe coincidir con los 2 primeros dígitos de postal_code |
 | bedrooms | número entero | sí | informativo; 0 o más (un estudio puede tener 0) |
 | bathrooms | número entero | sí | 1 o más |
 | square_meters | número decimal | sí | mayor que 0; 2 decimales |
@@ -161,6 +162,12 @@ para declarar sus ingresos.
 - Al archivarla, sus suministros ACTIVE y PENDING pasan a ENDED.
 - Una propiedad archivada no admite contratos nuevos ni facturas nuevas, pero su historial se puede consultar.
 - Se puede desarchivar en cualquier momento; la app propone reactivar los suministros que tenía.
+
+### provinces
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| code | texto (2) | si | clave primaria; codigo oficial (ej: 46 = Valencia) |
+| name | texto | si | único; maximo 50 caracteres |
 
 ### rooms
 | Campo | Tipo | Obligatorio | Notas |
@@ -380,6 +387,7 @@ para declarar sus ingresos.
 | Factura → cobros | 1:N | charges.invoice_id | se vacía; los OPEN pasan a VOID |
 | Cobro → pagos | 1:N | payments.charge_id | los cobros no se borran (solo VOID) |
 | Usuario → notificaciones | 1:N | notifications.recipient_id | se borran |
+| Provincia → propiedades | 1:N | properties.province_code | no se borran |
 
 **Borrado de la cuenta de un propietario**
 - Primero tiene que finalizar todos sus contratos activos.
@@ -404,3 +412,4 @@ para que el propietario pueda declarar sus ingresos.
 - Stripe: revisar el flujo de pago y la experiencia del inquilino (redireccion o formulario incrustado) antes de implementarlo
 - Archivos (fotos de incidencias, documentos de facturas, galería de inventario): aplazados hasta tener S3, por coste. Se guardarán en S3 privado con las medidas de seguridad acordadas, y en la base de datos solo la referencia (file_key).
 - Parámetros configurables: meses de preaviso del fin de contrato (según la LAU, 4 o 6) y días hasta borrar las notificaciones leídas (2).
+- Ids: UUID en todas las tablas excepto provinces, que usa su codigo oficial.
