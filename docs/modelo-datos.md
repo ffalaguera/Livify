@@ -169,6 +169,9 @@ para declarar sus ingresos.
 | code | texto (2) | si | clave primaria; codigo oficial (ej: 46 = Valencia) |
 | name | texto | si | único; maximo 50 caracteres |
 
+**Reglas**
+- Las 52 filas se cargan al crear la base de datos y no se modifican desde la app.
+
 ### rooms
 | Campo | Tipo | Obligatorio | Notas |
 |---|---|---|---|
