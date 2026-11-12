@@ -68,6 +68,7 @@ para declarar sus ingresos.
 - El modo de alquiler (completo o por habitaciones) lo fija la propiedad, y solo se puede cambiar si no tiene contratos activos.
 - El numero de habitaciones de la propiedad es informativo, las habitaciones que se alquilan se registran en rooms.
 - Los estudios solo se alquilan completos.
+- Una propiedad no se borra: se archiva (venta, uso propio o dejar de alquilarla) y se puede desarchivar.
 
 ### Suministros
 - El propietario elige la compañia de una lista filtrada por el tipo de suministro. Si no esta, elige "Otra" y el suministro queda sin compañia asignada.
@@ -144,6 +145,8 @@ para declarar sus ingresos.
 | square_meters | número decimal | sí | mayor que 0; 2 decimales |
 | rental_mode | lista de valores | sí | FULL (completo), ROOMS (por habitaciones) |
 | monthly_rent | dinero | solo si FULL | renta de la vivienda completa; vacío si ROOMS |
+| status | lista de valores | sí | ACTIVE (activa), ARCHIVED (archivada); por defecto ACTIVE |
+| archived_at | fecha y hora | no | cuándo se archivó; solo si ARCHIVED |
 | created_at | fecha y hora | sí | se rellena sola al crear |
 | updated_at | fecha y hora | sí | se actualiza sola al modificar |
 
@@ -154,6 +157,10 @@ para declarar sus ingresos.
 - En contratos completos, al actualizar monthly_rent se actualiza también la renta del contrato activo.
 - Los dos primeros dígitos de postal_code deben corresponder a la provincia.
 - Si property_type = STUDIO, rental_mode solo puede ser FULL.
+- Solo se puede archivar si no tiene contratos activos (primero hay que finalizarlos).
+- Al archivarla, sus suministros ACTIVE y PENDING pasan a ENDED.
+- Una propiedad archivada no admite contratos nuevos ni facturas nuevas, pero su historial se puede consultar.
+- Se puede desarchivar en cualquier momento; la app propone reactivar los suministros que tenía.
 
 ### rooms
 | Campo | Tipo | Obligatorio | Notas |
@@ -189,6 +196,8 @@ para declarar sus ingresos.
 - La compañía elegida debe ofrecer ese tipo de servicio (según company_services).
 - Las facturas solo se registran en suministros ACTIVE.
 - Al registrar una factura marcada como “última factura”, el suministro activo pasa a ENDED y el pendiente (si lo hay) pasa a ACTIVE.
+- Un suministro solo se puede borrar si no tiene facturas; si las tiene, se finaliza (ENDED).
+- Si se borra su compañía, el suministro pasa a "Otra" (company_id vacío).
 
 ### leases
 | Campo | Tipo | Obligatorio | Notas |
@@ -353,6 +362,28 @@ para declarar sus ingresos.
 - Al borrar un usuario, se borran sus notificaciones.
 
 ## 5. Relaciones
+
+| Relación | Tipo | Campo | Al borrar el "padre" |
+|---|---|---|---|
+| Propietario → propiedades | 1:N | properties.owner_id | solo al borrar la cuenta: todo en cascada |
+| Propiedad → habitaciones | 1:N | rooms.property_id | la propiedad no se borra, se archiva |
+| Propiedad → suministros | 1:N | utilities.property_id | la propiedad no se borra, se archiva |
+| Propiedad → contratos | 1:N | leases.property_id | la propiedad no se borra, se archiva |
+| Propiedad → cobros, historial de rentas, incidencias | 1:N | property_id | la propiedad no se borra, se archiva |
+| Habitación → contratos | 1:N | leases.room_id | no se puede borrar con contrato activo |
+| Habitación → cobros, historial de rentas, incidencias | 1:N | room_id | se vacía |
+| Contrato → inquilinos | 1:N | users.lease_id | al finalizar el contrato se borran sus inquilinos |
+| Contrato → cobros, historial de rentas, incidencias | 1:N | lease_id | se vacía |
+| Compañía → servicios | 1:N | company_services.company_id | se borran |
+| Compañía → suministros | 1:N | utilities.company_id | se vacía (pasa a "Otra") |
+| Suministro → facturas | 1:N | invoices.utility_id | solo se puede borrar sin facturas |
+| Factura → cobros | 1:N | charges.invoice_id | se vacía; los OPEN pasan a VOID |
+| Cobro → pagos | 1:N | payments.charge_id | los cobros no se borran (solo VOID) |
+| Usuario → notificaciones | 1:N | notifications.recipient_id | se borran |
+
+**Borrado de la cuenta de un propietario**
+- Primero tiene que finalizar todos sus contratos activos.
+- Después se borra todo lo suyo en cascada, con un aviso previo y la opción de descargar su historial.
 
 ## 6. Diagrama
 
