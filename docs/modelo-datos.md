@@ -7,6 +7,7 @@
 - Gestionar los cobros automáticamente: los inquilinos pagan desde la app y al propietario se le actualiza el estado de los cobros.
 - (inquilino) Registrar una o varias incidencias en su propiedad.
 - (inquilino) Hacer pagos.
+- (propietario) Ver gráficas de cada propiedad: evolución de la renta por años y gasto mensual de cada suministro.
 
 ## 2. Entidades
 - **users**: personas que utilizan la app; pueden ser propietarios o inquilinos.
@@ -47,6 +48,7 @@
 - Un inquilino no puede registrarse por su cuenta; necesita que un propietario lo registre.
 - Al borrar un inquilino se borran sus datos personales y su contrato. Se conservan, sin vincularlos a ninguna persona, sus cobros, sus pagos y el historial de rentas, porque el propietario los necesita
 para declarar sus ingresos.
+- Se conservan sus incidencias, sus notificaciones se borran.
 
 ### Rentas
 - Todos los contratos tienen su renta. En los completos es siempre la de la propiedad, y se actualizan juntas.
@@ -65,6 +67,7 @@ para declarar sus ingresos.
 - La dirección se pide desglosada (calle, numero, piso, puerta, codigo postal, ciudad y provincia) y se muestra junta.
 - El modo de alquiler (completo o por habitaciones) lo fija la propiedad, y solo se puede cambiar si no tiene contratos activos.
 - El numero de habitaciones de la propiedad es informativo, las habitaciones que se alquilan se registran en rooms.
+- Los estudios solo se alquilan completos.
 
 ### Suministros
 - El propietario elige la compañia de una lista filtrada por el tipo de suministro. Si no esta, elige "Otra" y el suministro queda sin compañia asignada.
@@ -150,7 +153,204 @@ para declarar sus ingresos.
 - rental_mode solo se puede cambiar si la propiedad no tiene contratos activos.
 - En contratos completos, al actualizar monthly_rent se actualiza también la renta del contrato activo.
 - Los dos primeros dígitos de postal_code deben corresponder a la provincia.
+- Si property_type = STUDIO, rental_mode solo puede ser FULL.
 
+### rooms
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | si | se genera solo |
+| property_id | UUID | si | apunta a properties |
+| room_number | numero entero | si | 1 o mas; unico dentro de la propiedad |
+| created_at | fecha y hora | si | se rellena sola al crear |
+| updated_at | fecha y hora | si | se actualiza sola al modificar |
+
+**Reglas**
+- Solo se puede crear habitaciones en propiedades con rental_mode = ROOMS.
+- No se puede repetir el mismo número de habitación en una propiedad.
+- No hay límite de habitaciones respecto a bedrooms; el propietario puede crear las que quiera y borrar las que no tengan contrato activo.
+- Una habitación solo se puede borrar si no tiene un contrato activo.
+- Al borrar una habitación, su historial de rentas se conserva ligado a la propiedad, sin indicar la habitación.
+
+### utilities
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | sí | se genera solo |
+| property_id | UUID | sí | apunta a properties |
+| service_type | lista de valores | sí | ELECTRICITY, WATER, GAS, INTERNET |
+| company_id | UUID | no | apunta a companies; vacío = "Otra" |
+| status | lista de valores | si | PENDING (registrado, aun no en uso), ACTIVE (en uso), ENDED (finalizado) |
+| ended_at | fecha | no | fecha en que se finalizo; solo si status = ENDED |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+| updated_at | fecha y hora | sí | se actualiza sola al modificar |
+
+**Reglas**
+- Solo puede haber un suministro ACTIVE de cada tipo por propiedad y como mucho uno PENDING.
+- Al cambiar de compañía se crea un suministro nuevo. Si ya llegó la última factura de la compañía actual, la actual pasa a ENDED y la nueva a ACTIVE. Si no, la nueva queda PENDING hasta que llegue la última factura. Las facturas antiguas no se modifican.
+- La compañía elegida debe ofrecer ese tipo de servicio (según company_services).
+- Las facturas solo se registran en suministros ACTIVE.
+- Al registrar una factura marcada como “última factura”, el suministro activo pasa a ENDED y el pendiente (si lo hay) pasa a ACTIVE.
+
+### leases
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | sí | se genera solo |
+| property_id | UUID | sí | apunta a properties |
+| room_id | UUID | solo si ROOM | apunta a rooms; vacío si FULL |
+| lease_type | lista de valores | sí | FULL, ROOM |
+| start_date | fecha | sí | inicio; decide el aniversario y si se aplica IRAV o IPC |
+| end_date | fecha | sí | fin pactado; se amplía si se prorroga |
+| monthly_rent | dinero | sí | renta actual; en FULL, igual a la de la propiedad |
+| deposit_amount | dinero | sí | importe de la fianza |
+| rent_update_agreed | sí/no | sí | si el contrato permite actualizar la renta; si "no", la app no sugiere actualizaciones |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+| updated_at | fecha y hora | sí | se actualiza sola al modificar |
+
+**Reglas**
+- lease_type debe coincidir con el rental_mode de la propiedad.
+- Si lease_type = ROOM, room_id es obligatorio y el contrato tiene un único inquilino.
+- Los cobros de renta se generan el día 1 de cada mes y vencen el día 5 (igual para todos los contratos).
+- Se avisa al propietario X meses antes de end_date (X es un parámetro configurable según la ley).
+- Al llegar end_date, la app pregunta al propietario si el contrato ha finalizado o se ha prorrogado. Si se prorroga, end_date se amplía un año.
+- Mientras el propietario no conteste, el contrato sigue activo y la app le recuerda la pregunta. La app nunca finaliza un contrato por su cuenta.
+- El contrato finaliza cuando se van todos sus inquilinos, o cuando el propietario confirma que ha finalizado.
+- Al finalizar, la app muestra la fianza a devolver.
+
+### rent_changes
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | sí | se genera solo |
+| property_id | UUID | sí | apunta a properties |
+| room_id | UUID | no | apunta a rooms; vacío si el contrato es completo o si la habitación se borró |
+| lease_id | UUID | no | apunta a leases; se vacía si el contrato se borra |
+| change_type | lista de valores | sí | INITIAL (renta inicial), UPDATE (actualización anual) |
+| effective_date | fecha | sí | desde cuándo se aplica la renta nueva |
+| previous_rent | dinero | no | vacío si change_type = INITIAL |
+| new_rent | dinero | sí | renta aplicada |
+| index_type | lista de valores | no | IRAV, IPC; vacío si INITIAL o si no hay límite (habitaciones) |
+| index_rate | número decimal | no | valor del índice usado (ej: 2,47) |
+| suggested_rent | dinero | no | renta máxima que sugirió la app |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+
+**Reglas**
+- Al crear un contrato se guarda una fila INITIAL con su renta.
+- Cada actualización anual guarda una fila UPDATE.
+- Si se borra el contrato o la habitación, la fila se conserva (lease_id o room_id se vacían) y sigue ligada a la propiedad.
+- Las filas no se modifican una vez creadas (es un historial).
+
+### invoices
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | sí | se genera solo |
+| utility_id | UUID | sí | apunta a utilities; debe estar ACTIVE al registrarla |
+| amount | dinero | sí | importe total; mayor que 0 |
+| period_start | fecha | sí | inicio del periodo facturado |
+| period_end | fecha | sí | fin del periodo; igual o posterior a period_start |
+| due_date | fecha | sí | orientativa: 15 días desde el registro; sin recargo |
+| is_final | sí/no | sí | última factura de esa compañía; por defecto "no" |
+| notes | texto | no | notas del propietario; máximo 500 caracteres |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+| updated_at | fecha y hora | sí | se actualiza sola al modificar |
+
+**Reglas**
+- Al registrarla se generan los cobros según las reglas de reparto.
+- Si is_final = sí, el suministro pasa a ENDED y el pendiente (si lo hay) a ACTIVE.
+- Al pasar due_date sin pagar, el cobro queda retrasado (se calcula), se avisa al propietario y se envían recordatorios al inquilino.
+- El propietario puede editarla o borrarla:
+  - Los cobros no pagados se recalculan, o pasan a VOID si se borra la factura.
+  - Si el importe baja y alguien ya pagó, se le devuelve la diferencia (REFUND en payments).
+  - Si el importe sube y alguien ya pagó, se le genera un cobro ADJUSTMENT por la diferencia.
+
+### charges
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | sí | se genera solo |
+| property_id | UUID | sí | apunta a properties; se conserva siempre |
+| room_id | UUID | no | apunta a rooms; vacío si el contrato es completo o si la habitación se borró |
+| lease_id | UUID | no | apunta a leases; se vacía si el contrato se borra |
+| charge_type | lista de valores | sí | RENT (renta), INVOICE (parte de una factura), ADJUSTMENT (diferencia al subir una factura ya pagada) |
+| invoice_id | UUID | no | apunta a invoices; solo en INVOICE y ADJUSTMENT; se vacía si la factura se borra |
+| description | texto | sí | concepto, ej: "Renta noviembre 2026" o "Luz – Iberdrola, octubre 2026"; se guarda al crear; máximo 200 caracteres |
+| amount | dinero | sí | importe; mayor que 0 |
+| due_date | fecha | sí | renta: día 5 del mes; factura y ajuste: 15 días desde que se crea |
+| status | lista de valores | sí | OPEN (pendiente), PAID (pagado), VOID (anulado), UNCOLLECTIBLE (dado por perdido) |
+| paid_at | fecha y hora | no | cuándo se pagó; solo si status = PAID |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+| updated_at | fecha y hora | sí | se actualiza sola al modificar |
+
+**Reglas**
+- Los cobros de renta se generan el día 1 de cada mes y vencen el día 5.
+- Solo el encargado del contrato puede pagar, y siempre el importe íntegro.
+- "Retrasado" no es un estado: es un cobro OPEN cuya due_date ya pasó (se calcula).
+- Si se borra una factura, sus cobros OPEN pasan a VOID. Los PAID siguen PAID, y la devolución se registra en payments.
+- Si una factura sube y ya estaba pagada, se crea un cobro ADJUSTMENT por la diferencia.
+- UNCOLLECTIBLE solo lo puede marcar el propietario.
+- Al borrar un inquilino, sus cobros se conservan sin datos personales (lease_id se vacía).
+- La parte informativa de cada inquilino en un contrato completo no se guarda: se calcula al mostrar el dashboard.
+
+### payments
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | sí | se genera solo |
+| charge_id | UUID | sí | apunta a charges; cobro que salda o del que se devuelve dinero |
+| payment_type | lista de valores | sí | PAYMENT (pago), REFUND (devolución) |
+| amount | dinero | sí | mayor que 0; en PAYMENT, igual al importe del cobro |
+| method | lista de valores | sí | STRIPE, TRANSFER, CASH, BIZUM, OTHER |
+| paid_at | fecha y hora | sí | cuándo se pagó o se devolvió |
+| notes | texto | no | notas del propietario; máximo 500 caracteres |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+
+**Reglas**
+- Un cobro solo puede tener un PAYMENT (el pago es íntegro).
+- La suma de los REFUND de un cobro no puede superar su importe.
+- Hasta que haya Stripe, los pagos y las devoluciones los registra el propietario a mano.
+- Los pagos no se modifican una vez creados; si hay un error, se corrige con una devolución.
+- Al borrar un inquilino, sus pagos se conservan sin datos personales (siguen ligados al cobro, y este a la propiedad).
+- El identificador de Stripe se añadirá con la épica de Stripe.
+
+### issues
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | sí | se genera solo |
+| property_id | UUID | sí | apunta a properties; se conserva siempre |
+| room_id | UUID | no | apunta a rooms; vacío si es contrato completo o si la habitación se borró |
+| lease_id | UUID | no | contrato del inquilino que la abrió; se vacía si se borra |
+| issue_type | lista de valores | sí | PLUMBING (fontanería), ELECTRICITY (electricidad), APPLIANCES (electrodomésticos), HVAC (calefacción y climatización), LOCKSMITH (cerrajería), DAMP (humedades), OTHER (otros) |
+| title | texto | sí | máximo 150 caracteres |
+| description | texto | sí | máximo 2.000 caracteres |
+| priority | lista de valores | sí | LOW, MEDIUM, HIGH, URGENT |
+| status | lista de valores | sí | OPEN (abierta), IN_PROGRESS (en curso), RESOLVED (resuelta) |
+| planned_resolution_date | fecha | no | fecha prevista; sin límite futuro; no anterior a la apertura |
+| resolved_at | fecha | no | fecha real; solo si RESOLVED; entre la apertura y hoy |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+| updated_at | fecha y hora | sí | se actualiza sola al modificar |
+
+**Reglas**
+- La abre el inquilino; el propietario cambia el estado y las fechas.
+- Las incidencias resueltas se conservan como historial de la propiedad.
+- Al borrar al inquilino, sus incidencias se conservan sin datos personales (lease_id se vacía).
+
+### notifications
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| id | UUID | sí | se genera solo |
+| recipient_id | UUID | sí | apunta a users; si se borra el usuario, se borran sus notificaciones |
+| notification_type | lista de valores | sí | ver lista abajo |
+| title | texto | sí | máximo 150 caracteres |
+| message | texto | sí | máximo 500 caracteres |
+| related_type | lista de valores | no | ISSUE, CHARGE, INVOICE, LEASE, PAYMENT |
+| related_id | UUID | no | id del elemento, para abrirlo al pulsar |
+| read_at | fecha y hora | no | vacío = no leída |
+| email_sent_at | fecha y hora | no | cuándo se envió por email; vacío si no se envió |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+
+**Tipos** (con ✉ los que también se envían por email)
+- Propietario: NEW_ISSUE, PAYMENT_RECEIVED, CHARGE_OVERDUE ✉, LEASE_ENDING_SOON ✉, LEASE_END_REACHED ✉, RENT_REVIEW_DUE ✉
+- Inquilino: NEW_INVOICE, CHARGE_REMINDER ✉, ISSUE_STATUS_CHANGED, RENT_UPDATED ✉, PAYMENT_FAILED ✉
+
+**Reglas**
+- Al pulsarla, se marca como leída (read_at) y se abre el elemento relacionado.
+- Las leídas se borran automáticamente a los 2 días de leerse. Las no leídas no se borran nunca.
+- Al borrar un usuario, se borran sus notificaciones.
 
 ## 5. Relaciones
 
@@ -170,3 +370,6 @@ para que el propietario pueda declarar sus ingresos.
 - stripe_account_id (propietarios): se añadirá con la épica de Stripe. 
 - Ids: UUID en todas las tablas para que no se puedan adivinar en las URLs.
 - Galería de fotos de entrada y salida (inventario): mejora futura. Las fotos irían ligadas al contrato, con momento CHECK_IN o CHECK_OUT, y se guardarían en S3.
+- Stripe: revisar el flujo de pago y la experiencia del inquilino (redireccion o formulario incrustado) antes de implementarlo
+- Archivos (fotos de incidencias, documentos de facturas, galería de inventario): aplazados hasta tener S3, por coste. Se guardarán en S3 privado con las medidas de seguridad acordadas, y en la base de datos solo la referencia (file_key).
+- Parámetros configurables: meses de preaviso del fin de contrato (según la LAU, 4 o 6) y días hasta borrar las notificaciones leídas (2).
