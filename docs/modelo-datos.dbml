@@ -1,0 +1,310 @@
+// Use DBML to define your database structure
+// Docs: https://dbml.dbdiagram.io/docs
+
+Enum user_role {
+  OWNER
+  TENANT
+}
+
+Enum utilities_service{
+ ELECTRICITY
+ WATER
+ GAS
+ INTERNET
+}
+
+Enum rent_index_type {
+  IRAV
+  IPC
+}
+
+Enum property_type {
+  FLAT
+  HOUSE
+  STUDIO
+  PENTHOUSE
+}
+
+Enum rental_mode_type{
+  FULL
+  ROOM
+}
+
+Enum property_status {
+  ACTIVE
+  ARCHIVED
+}
+
+Enum utility_status {
+  PENDING
+  ACTIVE
+  ENDED
+}
+
+Enum rent_change_type {
+  INITIAL
+  UPDATE
+}
+
+Enum charge_type {
+  RENT
+  INVOICE
+  ADJUSTMENT
+}
+
+Enum charge_status {
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+Enum payment_type {
+  PAYMENT
+  REFUND
+}
+
+Enum payment_method {
+  STRIPE
+  TRANSFER
+  CASH
+  BIZUM
+  OTHER
+}
+
+Enum issue_type {
+  PLUMBING
+  ELECTRICITY
+  APPLIANCES
+  HVAC
+  LOCKSMITH
+  DAMP
+  OTHER
+}
+
+Enum issue_priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+Enum issue_status {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+Enum notification_type {
+  NEW_ISSUE
+  PAYMENT_RECEIVED
+  CHARGE_OVERDUE
+  LEASE_ENDING_SOON
+  LEASE_END_REACHED
+  RENT_REVIEW_DUE
+  NEW_INVOICE
+  CHARGE_REMINDER
+  ISSUE_STATUS_CHANGED
+  RENT_UPDATED
+  PAYMENT_FAILED
+}
+
+Enum related_entity {
+  ISSUE
+  CHARGE
+  INVOICE
+  LEASE
+  PAYMENT
+}
+
+Table users {
+  id uuid [primary key]
+  full_name varchar(100) [not null] 
+  email varchar(255) [not null, unique]
+  password_hash varchar(255) [not null]
+  phone varchar(20)
+  role user_role [not null]
+  lease_id uuid [ref: > leases.id, note: 'solo inquilinos']
+  is_payer boolean [not null, default: false]
+  must_change_password boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table companies {
+  id uuid [primary key]
+  name varchar(100) [not null, unique]
+  is_partner boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table company_services {
+  company_id uuid [not null, ref: > companies.id]
+  service_type utilities_service [not null]
+
+  indexes {
+    (company_id, service_type) [pk]
+  }
+}
+
+Table rent_indexes {
+  id uuid [primary key]
+  index_type rent_index_type [not null]
+  period date [not null]
+  rate numeric(5,2) [not null]
+  published_at date [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (index_type, period) [unique]
+  }
+}
+
+Table provinces {
+  code char(2) [primary key, note: 'codigo oficial; coincide con los 2 primeros digitos del codigo postal']
+  name varchar(50) [not null, unique]
+}
+
+Table properties {
+  id uuid [primary key]
+  owner_id uuid [not null, ref: > users.id, note: 'propietario']
+  property_type property_type [not null]
+  street varchar(150) [not null]
+  street_number varchar(10) [not null]
+  floor varchar(20)
+  door varchar(10)
+  postal_code char(5) [not null]
+  city varchar(100) [not null]
+  province_code char(2) [not null, ref: > provinces.code]
+  bedrooms integer [not null, note: 'informativo; 0 o mas']
+  bathrooms integer [not null, note: '1 o mas']
+  square_meters numeric(8,2) [not null, note: 'mayor que 0']
+  rental_mode rental_mode_type [not null]
+  monthly_rent numeric(12,2) [note: 'solo si rental_mode = FULL; mayor que 0. Vacio si ROOM']
+  status property_status [not null, default: 'ACTIVE']
+  archived_at timestamptz [note: 'solo si ARCHIVED']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table rooms {
+  id uuid [primary key]
+  property_id uuid [not null, ref: > properties.id]
+  room_number integer [not null, note: '1 o mas; unico dentro de la propiedad']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (property_id, room_number) [unique]
+  }
+}
+
+Table utilities {
+  id uuid [primary key]
+  property_id uuid [not null, ref: > properties.id]
+  service_type utilities_service [not null]
+  company_id uuid [ref: > companies.id, note: 'apunta a companies; vacio = "Otra"']
+  status utility_status [not null]
+  ended_at date [note: 'fecha en que se finalizo; solo si status = ENDED']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table leases {
+  id uuid [primary key]
+  property_id uuid [not null, ref: > properties.id]
+  room_id uuid [ref: > rooms.id, note: 'apunta a rooms; vacio si FULL']
+  lease_type rental_mode_type [not null]
+  start_date date [not null, note: 'inicio; decide el aniversario y si se aplica IRAV o IPC']
+  end_date date [not null, note: 'fin pactado; se amplia si se prorroga']
+  monthly_rent numeric(12,2) [not null, note: 'renta actual; en FULL, igual a la de la propiedad']
+  deposit_amount numeric(12,2) [not null, note: 'importe fianza']
+  rent_update_agreed boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`] 
+}
+
+Table rent_changes {
+  id uuid [primary key]
+  property_id uuid [not null, ref: > properties.id]
+  room_id uuid [ref: > rooms.id, note: 'vacio si el contrato es completo o si la habitación se borró']
+  lease_id uuid [ref: > leases.id, note: 'se vacia si el contrato se borra']
+  change_type rent_change_type [not null]
+  effective_date date [not null, note: 'desde cuando se aplica la renta nueva']
+  previous_rent numeric(12,2) [note: 'vacio si change_type=INITIAL']
+  new_rent numeric(12,2) [not null, note: 'renta aplicada']
+  index_type rent_index_type [note: 'vacio si INITIAL o si no hay limite (habitaciones)']
+  index_rate numeric(5,2) [note: 'valor del índice usado (ej: 2,47)']
+  suggested_rent numeric(12,2) [note: 'renta máxima que sugirió la app']
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table invoices {
+  id uuid [primary key]
+  utility_id uuid [not null, ref: > utilities.id, note: 'debe estar ACTIVE al registrarla']
+  amount numeric(12,2) [not null, note: 'importe total; mayor que 0']
+  period_start date [not null, note: 'inicio del periodo facturado']
+  period_end date [not null, note: 'fin del periodo; igual o posterior a period_start']
+  due_date date [not null, note: 'orientativa: 15 dias desde el registro; sin recargo']
+  is_final boolean [not null, default: false, note: 'ultima factura de esa compañia']
+  notes varchar(500)
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table charges {
+  id uuid [primary key]
+  property_id uuid [not null, ref: > properties.id]
+  room_id uuid [ref: > rooms.id, note: 'vacio si el contrato es completo o si la habitacion se borro']
+  lease_id uuid [ref: > leases.id, note: 'se vacia si el contrato se borra']
+  charge_type charge_type [not null]
+  invoice_id uuid [ref: > invoices.id, note: 'solo en INVOICE y ADJUSTMENT; se vacia si la factura se borra']
+  description varchar(200) [not null, note: 'concepto, ej: "Renta noviembre 2026" o "Luz - Iberdrola, octubre 2026"; se guarda al crear']
+  amount numeric(12,2) [not null, note: 'importe; mayor que 0']
+  due_date date [not null, note: 'renta: dia 5 del mes; factura y ajuste: 15 dias desde que se crea']
+  status charge_status [not null, default: 'OPEN']
+  paid_at timestamptz [note: 'cuando se pago; solo si status = PAID']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table payments {
+  id uuid [primary key]
+  charge_id uuid [not null, ref: > charges.id, note: 'cobro que salda o del que se devuelve dinero']
+  payment_type payment_type [not null]
+  amount numeric(12,2) [not null, note: 'mayor que 0, en PAYMENT, igual al importe del cobro']
+  method payment_method [not null]
+  paid_at timestamptz [not null, note: 'cuando se pagó o se devolvió']
+  notes varchar(500) [note: 'notas del propietario']
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table issues {
+  id uuid [primary key]
+  property_id uuid [not null, ref: > properties.id]
+  room_id uuid [ref: > rooms.id, note: 'vacio si el contrato completo o si la habitacion se borro']
+  lease_id uuid [ref: > leases.id, note: 'contrato del inquilino que la abrio; se vacia si se borra']
+  issue_type issue_type [not null]
+  title varchar(150) [not null]
+  description varchar(2000) [not null]
+  priority issue_priority [not null]
+  status issue_status [not null, default: 'OPEN']
+  planned_resolution_date date [note: 'fecha prevista; sin limite futuro; no anterior a la apertura']
+  resolved_at date [note: 'fecha real; solo si RESOLVED; entre la apertura y hoy']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table notifications {
+  id uuid [primary key]
+  recipient_id uuid [not null, ref: > users.id, note: 'si se borra el usuario, se borran sus notificaciones']
+  notification_type notification_type [not null]
+  title varchar(150) [not null]
+  message varchar(500) [not null]
+  related_type related_entity
+  related_id uuid [note: 'id del elemento, para abrirlo al pulsar']
+  read_at timestamptz [note: 'vacio = no leida']
+  email_sent_at timestamptz [note: 'cuando se envio por email; vacio si no se envio']
+  created_at timestamptz [not null, default: `now()`]
+}

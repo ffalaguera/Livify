@@ -144,8 +144,8 @@ para declarar sus ingresos.
 | bedrooms | número entero | sí | informativo; 0 o más (un estudio puede tener 0) |
 | bathrooms | número entero | sí | 1 o más |
 | square_meters | número decimal | sí | mayor que 0; 2 decimales |
-| rental_mode | lista de valores | sí | FULL (completo), ROOMS (por habitaciones) |
-| monthly_rent | dinero | solo si FULL | renta de la vivienda completa; vacío si ROOMS |
+| rental_mode | lista de valores | sí | FULL (completo), ROOM (por habitaciones) |
+| monthly_rent | dinero | solo si FULL | renta de la vivienda completa; vacío si ROOM |
 | status | lista de valores | sí | ACTIVE (activa), ARCHIVED (archivada); por defecto ACTIVE |
 | archived_at | fecha y hora | no | cuándo se archivó; solo si ARCHIVED |
 | created_at | fecha y hora | sí | se rellena sola al crear |
@@ -153,7 +153,7 @@ para declarar sus ingresos.
 
 **Reglas**
 - owner_id debe ser un usuario con rol OWNER.
-- Si rental_mode = FULL, monthly_rent es obligatorio y mayor que 0. Si es ROOMS, va vacío.
+- Si rental_mode = FULL, monthly_rent es obligatorio y mayor que 0. Si es ROOM, va vacío.
 - rental_mode solo se puede cambiar si la propiedad no tiene contratos activos.
 - En contratos completos, al actualizar monthly_rent se actualiza también la renta del contrato activo.
 - Los dos primeros dígitos de postal_code deben corresponder a la provincia.
