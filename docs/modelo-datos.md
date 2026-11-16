@@ -47,9 +47,10 @@
 
 ### Inquilinos
 - Un inquilino no puede registrarse por su cuenta; necesita que un propietario lo registre.
-- Al borrar un inquilino se borran sus datos personales y su contrato. Se conservan, sin vincularlos a ninguna persona, sus cobros, sus pagos y el historial de rentas, porque el propietario los necesita
-para declarar sus ingresos.
+- Al borrar un inquilino se borran sus datos personales. Se conservan, sin vincularlos a ninguna persona, sus cobros, sus pagos y el historial de rentas, porque el propietario los necesita para declarar sus ingresos.
+- Si era el último inquilino de su contrato, el contrato pasa a ENDED.
 - Se conservan sus incidencias, sus notificaciones se borran.
+- No se puede borrar al encargado de un contrato con cobros OPEN: sus datos se conservan hasta que la deuda se pague o se dé por perdida.
 
 ### Rentas
 - Todos los contratos tienen su renta. En los completos es siempre la de la propiedad, y se actualizan juntas.
@@ -87,6 +88,7 @@ para declarar sus ingresos.
 | lease_id | UUID | solo inquilinos | contrato al que pertenece; vacío en propietarios |
 | is_payer | sí/no | sí | encargado de pagos de su contrato; en propietarios siempre "no" |
 | must_change_password | sí/no | sí | por defecto "no"; "sí" cuando el propietario crea al inquilino |
+| moved_in_at | fecha | solo inquilinos | dia de entrada en la vivienda; cuenta como dia completo en el reparto |
 | created_at | fecha y hora | sí | se rellena sola al crear |
 | updated_at | fecha y hora | sí | se actualiza sola al modificar |
 
@@ -94,6 +96,8 @@ para declarar sus ingresos.
 - Un OWNER no puede tener lease_id ni is_payer = sí.
 - Un TENANT tiene que tener lease_id.
 - Solo puede haber un encargado por contrato.
+- Un TENANT tiene que tener moved_in_at, y no puede ser anterior al start_date de su contrato.
+- No se puede borrar al encargado de un contrato que tenga cobros OPEN.
 
 ### companies
 | Campo | Tipo | Obligatorio | Notas |
@@ -166,8 +170,8 @@ para declarar sus ingresos.
 ### provinces
 | Campo | Tipo | Obligatorio | Notas |
 |---|---|---|---|
-| code | texto (2) | si | clave primaria; codigo oficial (ej: 46 = Valencia) |
-| name | texto | si | único; maximo 50 caracteres |
+| code | texto (2) | sí | clave primaria; codigo oficial (ej: 46 = Valencia) |
+| name | texto | sí | único; maximo 50 caracteres |
 
 **Reglas**
 - Las 52 filas se cargan al crear la base de datos y no se modifican desde la app.
@@ -175,18 +179,19 @@ para declarar sus ingresos.
 ### rooms
 | Campo | Tipo | Obligatorio | Notas |
 |---|---|---|---|
-| id | UUID | si | se genera solo |
-| property_id | UUID | si | apunta a properties |
+| id | UUID | sí | se genera solo |
+| property_id | UUID | sí | apunta a properties |
 | room_number | numero entero | si | 1 o mas; unico dentro de la propiedad |
-| created_at | fecha y hora | si | se rellena sola al crear |
-| updated_at | fecha y hora | si | se actualiza sola al modificar |
+| created_at | fecha y hora | sí | se rellena sola al crear |
+| updated_at | fecha y hora | sí | se actualiza sola al modificar |
 
 **Reglas**
-- Solo se puede crear habitaciones en propiedades con rental_mode = ROOMS.
+- Solo se puede crear habitaciones en propiedades con rental_mode = ROOM.
 - No se puede repetir el mismo número de habitación en una propiedad.
 - No hay límite de habitaciones respecto a bedrooms; el propietario puede crear las que quiera y borrar las que no tengan contrato activo.
 - Una habitación solo se puede borrar si no tiene un contrato activo.
 - Al borrar una habitación, su historial de rentas se conserva ligado a la propiedad, sin indicar la habitación.
+- Si la propiedad pasa a FULL, sus habitaciones se conservan, pero no se usan hasta que vuelva a ROOM.
 
 ### utilities
 | Campo | Tipo | Obligatorio | Notas |
@@ -195,7 +200,7 @@ para declarar sus ingresos.
 | property_id | UUID | sí | apunta a properties |
 | service_type | lista de valores | sí | ELECTRICITY, WATER, GAS, INTERNET |
 | company_id | UUID | no | apunta a companies; vacío = "Otra" |
-| status | lista de valores | si | PENDING (registrado, aun no en uso), ACTIVE (en uso), ENDED (finalizado) |
+| status | lista de valores | sí | PENDING (registrado, aun no en uso), ACTIVE (en uso), ENDED (finalizado) |
 | ended_at | fecha | no | fecha en que se finalizo; solo si status = ENDED |
 | created_at | fecha y hora | sí | se rellena sola al crear |
 | updated_at | fecha y hora | sí | se actualiza sola al modificar |
@@ -218,8 +223,11 @@ para declarar sus ingresos.
 | lease_type | lista de valores | sí | FULL, ROOM |
 | start_date | fecha | sí | inicio; decide el aniversario y si se aplica IRAV o IPC |
 | end_date | fecha | sí | fin pactado; se amplía si se prorroga |
+| status | lista de valores | sí | ACTIVE (activo), ENDED (finalizado); por defecto ACTIVE |
+| ended_at | fecha | no | fecha real en que finalizó; solo si ENDED |
 | monthly_rent | dinero | sí | renta actual; en FULL, igual a la de la propiedad |
 | deposit_amount | dinero | sí | importe de la fianza |
+| additional_guarantee | dinero | no | garantía adicional a la fianza (depósito o aval); vacío si no hay |
 | rent_update_agreed | sí/no | sí | si el contrato permite actualizar la renta; si "no", la app no sugiere actualizaciones |
 | created_at | fecha y hora | sí | se rellena sola al crear |
 | updated_at | fecha y hora | sí | se actualiza sola al modificar |
@@ -231,8 +239,10 @@ para declarar sus ingresos.
 - Se avisa al propietario X meses antes de end_date (X es un parámetro configurable según la ley).
 - Al llegar end_date, la app pregunta al propietario si el contrato ha finalizado o se ha prorrogado. Si se prorroga, end_date se amplía un año.
 - Mientras el propietario no conteste, el contrato sigue activo y la app le recuerda la pregunta. La app nunca finaliza un contrato por su cuenta.
-- El contrato finaliza cuando se van todos sus inquilinos, o cuando el propietario confirma que ha finalizado.
-- Al finalizar, la app muestra la fianza a devolver.
+- Al finalizar, la app muestra la fianza y la garantía adicional disponibles, para cubrir los cobros pendientes y saber cuánto hay que devolver.
+- Cuando el contrato finaliza, pasa a ENDED. A los 10 días se borra, junto con los inquilinos que queden.
+- Al finalizar con cobros pendientes, la app avisa al propietario. Puede descontarlos de la fianza (PAID, método OTHER) o darlos por perdidos (UNCOLLECTIBLE).
+- Un contrato ENDED con cobros OPEN no se borra a los 10 días: se conserva, con sus inquilinos, hasta que los cobros se paguen o se marquen como UNCOLLECTIBLE.
 
 ### rent_changes
 | Campo | Tipo | Obligatorio | Notas |
@@ -337,6 +347,7 @@ para declarar sus ingresos.
 | title | texto | sí | máximo 150 caracteres |
 | description | texto | sí | máximo 2.000 caracteres |
 | priority | lista de valores | sí | LOW, MEDIUM, HIGH, URGENT |
+| reported_by | UUID | no | apunta a users; inquilino que la abrio; se vacia si se borra |
 | status | lista de valores | sí | OPEN (abierta), IN_PROGRESS (en curso), RESOLVED (resuelta) |
 | planned_resolution_date | fecha | no | fecha prevista; sin límite futuro; no anterior a la apertura |
 | resolved_at | fecha | no | fecha real; solo si RESOLVED; entre la apertura y hoy |
@@ -346,7 +357,7 @@ para declarar sus ingresos.
 **Reglas**
 - La abre el inquilino; el propietario cambia el estado y las fechas.
 - Las incidencias resueltas se conservan como historial de la propiedad.
-- Al borrar al inquilino, sus incidencias se conservan sin datos personales (lease_id se vacía).
+- Al borrar al inquilino, sus incidencias se conservan sin datos personales (lease_id y reported_by se vacían).
 
 ### notifications
 | Campo | Tipo | Obligatorio | Notas |
@@ -382,7 +393,7 @@ para declarar sus ingresos.
 | Propiedad → cobros, historial de rentas, incidencias | 1:N | property_id | la propiedad no se borra, se archiva |
 | Habitación → contratos | 1:N | leases.room_id | no se puede borrar con contrato activo |
 | Habitación → cobros, historial de rentas, incidencias | 1:N | room_id | se vacía |
-| Contrato → inquilinos | 1:N | users.lease_id | al finalizar el contrato se borran sus inquilinos |
+| Contrato → inquilinos | 1:N | users.lease_id | al borrarse el contrato (10 días después de ENDED, si no tiene cobros OPEN) se borran los inquilinos que queden |
 | Contrato → cobros, historial de rentas, incidencias | 1:N | lease_id | se vacía |
 | Compañía → servicios | 1:N | company_services.company_id | se borran |
 | Compañía → suministros | 1:N | utilities.company_id | se vacía (pasa a "Otra") |
@@ -391,6 +402,7 @@ para declarar sus ingresos.
 | Cobro → pagos | 1:N | payments.charge_id | los cobros no se borran (solo VOID) |
 | Usuario → notificaciones | 1:N | notifications.recipient_id | se borran |
 | Provincia → propiedades | 1:N | properties.province_code | no se borran |
+| Usuario → incidencias que abrió | 1:N | issues.reported_by | se vacía |
 
 **Borrado de la cuenta de un propietario**
 - Primero tiene que finalizar todos sus contratos activos.
@@ -398,21 +410,24 @@ para declarar sus ingresos.
 
 ## 6. Diagrama
 
+![Diagrama del modelo de datos](modelo-datos.png)
+
 ## 7. Decisiones descartadas y mejoras futuras
+
 - No se comparte el historial de morosidad entre propietarios: es un dato personal y lo impide el RGPD.
 - El Stripe se implementara despues del nucleo. primero funcionara con "marcar como pagado" para no bloquear el resto del desarrollo.
 - El prorrateo de quien se va se resuelve fuera de la app. asi se simplifica el calculo del reparto.
 - No hay tabla de roles: el rol es un campo de users, porque solo hay dos roles fijos.
 - Cobro automatico en tarjeta o domiciliacion: queda como mejora futura: de momento, el encargado paga cuando quiere.
-- Borrado de inquilinos: eligió anonimizar(borrar los datos personales y conservar los economicos), en lugar del borrado fisico completo,
+- Borrado de inquilinos: se eligió anonimizar(borrar los datos personales y conservar los economicos), en lugar del borrado fisico completo,
 para que el propietario pueda declarar sus ingresos.
 - Locales y garajes descartados por ahora. porque no tienen habitaciones ni admiten alquiler por habitaciones.
 - Estado de la cuenta (activa, suspendida, impago…): descartado por ahora. Los inquilinos se borran al dejar la propiedad, y para los propietarios no hay funcionalidad que lo necesite. Se valorará si Livify cobra suscripciones.
 - Avatar o foto de perfil: descartado, no esta en las funcionalidades.
 - stripe_account_id (propietarios): se añadirá con la épica de Stripe. 
-- Ids: UUID en todas las tablas para que no se puedan adivinar en las URLs.
 - Galería de fotos de entrada y salida (inventario): mejora futura. Las fotos irían ligadas al contrato, con momento CHECK_IN o CHECK_OUT, y se guardarían en S3.
 - Stripe: revisar el flujo de pago y la experiencia del inquilino (redireccion o formulario incrustado) antes de implementarlo
+- Parámetros configurables: meses de preaviso del fin de contrato (según la LAU, 4 o 6), días hasta borrar las notificaciones leídas (2) y días hasta borrar un contrato finalizado (10).
 - Archivos (fotos de incidencias, documentos de facturas, galería de inventario): aplazados hasta tener S3, por coste. Se guardarán en S3 privado con las medidas de seguridad acordadas, y en la base de datos solo la referencia (file_key).
-- Parámetros configurables: meses de preaviso del fin de contrato (según la LAU, 4 o 6) y días hasta borrar las notificaciones leídas (2).
 - Ids: UUID en todas las tablas excepto provinces, que usa su codigo oficial.
+- Inquilinos con deudas: sus datos se conservan hasta que la deuda se pague o se dé por perdida, para que el propietario pueda reclamarla. El RGPD permite conservar datos para ejercer reclamaciones.
